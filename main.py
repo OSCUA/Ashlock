@@ -40,6 +40,40 @@ def check_expiration(meta):
             os.remove(KEY_FILE)
         exit()
 
+# Encrypt all files in the vault
+def encrypt_vault(key: bytes):
+    for root, _, files in os.walk(VAULT_DIR):
+        for file in files:
+            path = os.path.join(root, file)
+            if path.endswith(".enc"):
+                continue
+            with open(path, "rb") as f:
+                data = f.read()
+            nonce = os.urandom(12)
+            aesgcm = AESGCM(key)
+            encrypted = aesgcm.encrypt(nonce, data, None)
+            with open(path + ".enc", "wb") as f:
+                f.write(nonce + encrypted)
+            os.remove(path)
+    print("[🔒] Vault locked and encrypted.")
+
+# Decrypt all .enc files in the vault
+def decrypt_vault(key: bytes):
+    for root, _, files in os.walk(VAULT_DIR):
+        for file in files:
+            if not file.endswith(".enc"):
+                continue
+            path = os.path.join(root, file)
+            with open(path, "rb") as f:
+                nonce = f.read(12)
+                encrypted = f.read()
+            aesgcm = AESGCM(key)
+            decrypted = aesgcm.decrypt(nonce, encrypted, None)
+            with open(path.replace(".enc", ""), "wb") as f:
+                f.write(decrypted)
+            os.remove(path)
+    print("[🔓] Vault unlocked and decrypted.")
+
 # Setup vault
 def setup_vault():
     os.makedirs(VAULT_DIR, exist_ok=True)
@@ -47,11 +81,9 @@ def setup_vault():
     salt = os.urandom(16)
     key = derive_key(password, salt)
 
-    # Save key securely (demo only — use secure storage in production)
     with open(KEY_FILE, "wb") as f:
         f.write(salt + key)
 
-    # Optional time-lock setup
     if input("Enable time-locked self-destruct? (y/n): ").lower() == "y":
         expiry = input("Enter expiry datetime (YYYY-MM-DD HH:MM:SS UTC): ")
         mode = input("Deletion mode ('delete' or 'shred'): ").strip()
@@ -62,31 +94,56 @@ def setup_vault():
 
     print("[+] Vault setup complete.")
 
-# Mount vault
-def mount_vault():
+# Load key from file
+def load_key():
     if not os.path.exists(KEY_FILE):
         print("[!] Vault key missing.")
-        return
-
+        return None, None
     with open(KEY_FILE, "rb") as f:
         data = f.read()
-        salt, key = data[:16], data[16:]
+        return data[:16], data[16:]
 
+# Mount vault
+def mount_vault():
+    salt, key = load_key()
+    if not key:
+        return
     if os.path.exists(META_FILE):
         with open(META_FILE, "r") as f:
             meta = json.load(f)
         check_expiration(meta)
-
     print("[+] Vault mounted. You may access files in:", VAULT_DIR)
+
+# Lock vault
+def lock_vault():
+    salt, key = load_key()
+    if not key:
+        return
+    encrypt_vault(key)
+
+# Unlock vault
+def unlock_vault():
+    salt, key = load_key()
+    if not key:
+        return
+    decrypt_vault(key)
 
 # Ritual menu
 def main():
-    print("=== Shrine Vault ===")
-    choice = input("Choose: [1] Setup Vault  [2] Mount Vault\n> ")
+    print("=== Shrine Vault: Ashlock ===")
+    print("[1] Setup Vault")
+    print("[2] Mount Vault")
+    print("[3] Lock Vault")
+    print("[4] Unlock Vault")
+    choice = input("> ")
     if choice == "1":
         setup_vault()
     elif choice == "2":
         mount_vault()
+    elif choice == "3":
+        lock_vault()
+    elif choice == "4":
+        unlock_vault()
     else:
         print("Invalid choice.")
 
